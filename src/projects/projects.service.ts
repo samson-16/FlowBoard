@@ -7,26 +7,24 @@ import { WorkspaceRole } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { WorkspaceAccessService } from '../common/services/workspace-access.service';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly workspaceAccessService: WorkspaceAccessService,
+  ) {}
 
   async create(
     userId: string,
     workspaceId: string,
     createProjectDto: CreateProjectDto,
   ) {
-    const membership = await this.getMembership(userId, workspaceId);
-
-    if (
-      membership.role !== WorkspaceRole.OWNER &&
-      membership.role !== WorkspaceRole.ADMIN
-    ) {
-      throw new ForbiddenException(
-        'Only owners and admins can create projects',
-      );
-    }
+    await this.workspaceAccessService.requireRoles(userId, workspaceId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     return this.prisma.project.create({
       data: {
@@ -37,25 +35,27 @@ export class ProjectsService {
     });
   }
 
-  async findByWorkspace(userId: string, workspaceId: string) {
-    await this.getMembership(userId, workspaceId);
+  
 
-    return this.prisma.project.findMany({
-      where: {
-        workspaceId,
-      },
-      include: {
-        _count: {
-          select: {
-            tasks: true,
-          },
+  async findByWorkspace(userId: string, workspaceId: string) {
+  await this.workspaceAccessService.getMembership(userId, workspaceId);
+
+  return this.prisma.project.findMany({
+    where: {
+      workspaceId,
+    },
+    include: {
+      _count: {
+        select: {
+          tasks: true,
         },
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-  }
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+}
 
   async findOne(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
@@ -76,7 +76,10 @@ export class ProjectsService {
       throw new NotFoundException('Project not found');
     }
 
-    const membership = await this.getMembership(userId, project.workspaceId);
+    const membership = await this.workspaceAccessService.getMembership(
+      userId,
+      project.workspaceId,
+    );
 
     return {
       role: membership.role,
@@ -99,7 +102,10 @@ export class ProjectsService {
       throw new NotFoundException('Project not found');
     }
 
-    const membership = await this.getMembership(userId, project.workspaceId);
+    const membership =await this.workspaceAccessService.requireRoles(userId, project.workspaceId, [
+  WorkspaceRole.OWNER,
+  WorkspaceRole.ADMIN,
+]);
 
     if (
       membership.role !== WorkspaceRole.OWNER &&
@@ -132,7 +138,10 @@ export class ProjectsService {
       throw new NotFoundException('Project not found');
     }
 
-    const membership = await this.getMembership(userId, project.workspaceId);
+    const membership = await this.workspaceAccessService.requireRoles(userId, project.workspaceId, [
+  WorkspaceRole.OWNER,
+  WorkspaceRole.ADMIN,
+]);
 
     if (
       membership.role !== WorkspaceRole.OWNER &&
