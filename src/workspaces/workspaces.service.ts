@@ -11,89 +11,139 @@ import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
+import {
+  memberPublicSelect,
+  projectBasicSelect,
+  workspaceBasicSelect,
+} from '../common/selects/prisma.select';
+
 
 @Injectable()
 export class WorkspacesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(userId: string, createWorkspaceDto: CreateWorkspaceDto) {
-    const workspace = await this.prisma.workspace.create({
-      data: {
-        name: createWorkspaceDto.name,
-        description: createWorkspaceDto.description,
-        members: {
-          create: {
-            userId,
-            role: 'OWNER',
-          },
+  const workspace = await this.prisma.workspace.create({
+    data: {
+      name: createWorkspaceDto.name,
+      description: createWorkspaceDto.description,
+      members: {
+        create: {
+          userId,
+          role: 'OWNER',
         },
       },
-      include: {
-        members: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
+    },
+    select: {
+      ...workspaceBasicSelect,
+      members: {
+        select: memberPublicSelect,
+      },
+      _count: {
+        select: {
+          members: true,
+          projects: true,
+        },
+      },
+    },
+  });
+
+  return workspace;
+}
+
+ async findMyWorkspaces(userId: string) {
+  const memberships = await this.prisma.workspaceMember.findMany({
+    where: {
+      userId,
+    },
+    select: {
+      role: true,
+      workspace: {
+        select: {
+          ...workspaceBasicSelect,
+          _count: {
+            select: {
+              members: true,
+              projects: true,
             },
           },
         },
       },
-    });
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
 
-    return workspace;
-  }
-
-  async findMyWorkspaces(userId: string) {
-    const memberships = await this.prisma.workspaceMember.findMany({
-      where: {
-        userId,
-      },
-      include: {
-        workspace: true,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    return memberships.map((membership) => ({
-      role: membership.role,
-      workspace: membership.workspace,
-    }));
-  }
+  return memberships.map((membership) => ({
+    role: membership.role,
+    ...membership.workspace,
+    membersCount: membership.workspace._count.members,
+    projectsCount: membership.workspace._count.projects,
+  }));
+}
 
   async findOne(userId: string, workspaceId: string) {
-    const membership = await this.getMembership(userId, workspaceId);
+  const membership = await this.getMembership(userId, workspaceId);
 
-    const workspace = await this.prisma.workspace.findUnique({
-      where: {
-        id: workspaceId,
+  const workspace = await this.prisma.workspace.findUnique({
+    where: {
+      id: workspaceId,
+    },
+    select: {
+      ...workspaceBasicSelect,
+      members: {
+        select: memberPublicSelect,
+        orderBy: {
+          createdAt: 'asc',
+        },
       },
-      include: {
-        members: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
+      projects: {
+        select: {
+          ...projectBasicSelect,
+          _count: {
+            select: {
+              tasks: true,
             },
           },
         },
-        projects: true,
+        orderBy: {
+          createdAt: 'desc',
+        },
       },
-    });
+      _count: {
+        select: {
+          members: true,
+          projects: true,
+        },
+      },
+    },
+  });
 
-    return {
-      role: membership.role,
-      workspace,
-    };
+  if (!workspace) {
+    throw new NotFoundException('Workspace not found');
   }
 
+  return {
+    role: membership.role,
+    id: workspace.id,
+    name: workspace.name,
+    description: workspace.description,
+    createdAt: workspace.createdAt,
+    updatedAt: workspace.updatedAt,
+    membersCount: workspace._count.members,
+    projectsCount: workspace._count.projects,
+    members: workspace.members,
+    projects: workspace.projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      tasksCount: project._count.tasks,
+    })),
+  };
+}
   async update(
     userId: string,
     workspaceId: string,
@@ -184,44 +234,28 @@ export class WorkspacesService {
     }
 
     return this.prisma.workspaceMember.create({
-      data: {
-        userId: userToAdd.id,
-        workspaceId,
-        role,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
-    });
+  data: {
+    userId: userToAdd.id,
+    workspaceId,
+    role,
+  },
+  select: memberPublicSelect,
+});
   }
 
-  async findMembers(userId: string, workspaceId: string) {
-    await this.getMembership(userId, workspaceId);
+ async findMembers(userId: string, workspaceId: string) {
+  await this.getMembership(userId, workspaceId);
 
-    return this.prisma.workspaceMember.findMany({
-      where: {
-        workspaceId,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
-    });
-  }
+  return this.prisma.workspaceMember.findMany({
+    where: {
+      workspaceId,
+    },
+    select: memberPublicSelect,
+    orderBy: {
+      createdAt: 'asc',
+    },
+  });
+}
 
   async updateMemberRole(
     userId: string,
@@ -250,23 +284,15 @@ export class WorkspacesService {
       throw new BadRequestException('You cannot change your own role');
     }
 
-    return this.prisma.workspaceMember.update({
-      where: {
-        id: memberId,
-      },
-      data: {
-        role: updateMemberRoleDto.role,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
-    });
+   return this.prisma.workspaceMember.update({
+  where: {
+    id: memberId,
+  },
+  data: {
+    role: updateMemberRoleDto.role,
+  },
+  select: memberPublicSelect,
+});
   }
 
   async removeMember(userId: string, workspaceId: string, memberId: string) {

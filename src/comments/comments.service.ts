@@ -8,7 +8,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { WorkspaceAccessService } from '../common/services/workspace-access.service';
 
-
 @Injectable()
 export class CommentsService {
   constructor(
@@ -16,10 +15,17 @@ export class CommentsService {
     private readonly workspaceAccessService: WorkspaceAccessService,
   ) {}
 
-  async create(userId: string, taskId: string, createCommentDto: CreateCommentDto) {
+  async create(
+    userId: string,
+    taskId: string,
+    createCommentDto: CreateCommentDto,
+  ) {
     const task = await this.getTaskWithWorkspace(taskId);
 
-    await this.workspaceAccessService.getMembership(userId, task.project.workspaceId);
+    await this.workspaceAccessService.getMembership(
+      userId,
+      task.project.workspaceId,
+    );
 
     return this.prisma.comment.create({
       data: {
@@ -27,36 +33,23 @@ export class CommentsService {
         taskId,
         userId,
       },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      select: this.commentSelect(),
     });
   }
 
   async findByTask(userId: string, taskId: string) {
     const task = await this.getTaskWithWorkspace(taskId);
 
-    await this.workspaceAccessService.getMembership(userId, task.project.workspaceId);
+    await this.workspaceAccessService.getMembership(
+      userId,
+      task.project.workspaceId,
+    );
 
     return this.prisma.comment.findMany({
       where: {
         taskId,
       },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      select: this.commentSelect(),
       orderBy: {
         createdAt: 'desc',
       },
@@ -82,9 +75,9 @@ export class CommentsService {
     }
 
     const membership = await this.workspaceAccessService.getMembership(
-  userId,
-  comment.task.project.workspaceId,
-);
+      userId,
+      comment.task.project.workspaceId,
+    );
 
     const isCommentOwner = comment.userId === userId;
     const isWorkspaceAdmin =
@@ -92,9 +85,7 @@ export class CommentsService {
       membership.role === WorkspaceRole.ADMIN;
 
     if (!isCommentOwner && !isWorkspaceAdmin) {
-      throw new ForbiddenException(
-        'You can only delete your own comment',
-      );
+      throw new ForbiddenException('You can only delete your own comment');
     }
 
     await this.prisma.comment.delete({
@@ -129,4 +120,19 @@ export class CommentsService {
     return task;
   }
 
+  private commentSelect() {
+    return {
+      id: true,
+      content: true,
+      createdAt: true,
+      updatedAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    };
+  }
 }

@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { userPublicSelect } from '../common/selects/prisma.select';
 import { PrismaService } from '../prisma/prisma.service';
+
 
 @Injectable()
 export class UsersService {
@@ -18,19 +20,15 @@ export class UsersService {
   }
 
   async createUser(data: {
-    name: string;
-    email: string;
-    password: string;
-  }) {
-    return this.prisma.user.create({
-      data,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-  }
+  name: string;
+  email: string;
+  password: string;
+}) {
+  return this.prisma.user.create({
+    data,
+    select: userPublicSelect,
+  });
+}
+
+ 
 }

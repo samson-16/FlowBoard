@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { FilterTasksDto } from './dto/filter-tasks.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+// import { taskBasicSelect } from '../common/selects/prisma.select';
 
 @Injectable()
 export class TasksService {
@@ -37,98 +38,132 @@ export class TasksService {
         projectId,
         assigneeId: createTaskDto.assigneeId,
       },
-      include: this.taskInclude(),
+      select: this.taskSelect(),
     });
   }
+async findByProject(
+  userId: string,
+  projectId: string,
+  filterTasksDto: FilterTasksDto,
+) {
+  const project = await this.getProjectWithWorkspace(projectId);
 
-  async findByProject(
-    userId: string,
-    projectId: string,
-    filterTasksDto: FilterTasksDto,
-  ) {
-    const project = await this.getProjectWithWorkspace(projectId);
+  await this.workspaceAccess.getMembership(userId, project.workspaceId);
 
-    await this.workspaceAccess.getMembership(userId, project.workspaceId);
+  const page = filterTasksDto.page ?? 1;
+  const limit = filterTasksDto.limit ?? 10;
+  const skip = (page - 1) * limit;
 
-    const page = filterTasksDto.page ?? 1;
-    const limit = filterTasksDto.limit ?? 10;
-    const skip = (page - 1) * limit;
+  const where: Prisma.TaskWhereInput = {
+    projectId,
+    status: filterTasksDto.status,
+    priority: filterTasksDto.priority,
+  };
 
-    const where: Prisma.TaskWhereInput = {
-      projectId,
-      status: filterTasksDto.status,
-      priority: filterTasksDto.priority,
-    };
+  const [tasks, total] = await Promise.all([
+    this.prisma.task.findMany({
+      where,
+      select: this.taskSelect(),
+      orderBy: {
+        createdAt: 'desc',
+      },
+      skip,
+      take: limit,
+    }),
+    this.prisma.task.count({
+      where,
+    }),
+  ]);
 
-    const [tasks, total] = await Promise.all([
-      this.prisma.task.findMany({
-        where,
-        include: this.taskInclude(),
+  return {
+    data: tasks,
+    meta: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+}
+
+ async findOne(userId: string, taskId: string) {
+  const task = await this.prisma.task.findUnique({
+    where: {
+      id: taskId,
+    },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      status: true,
+      priority: true,
+      dueDate: true,
+      createdAt: true,
+      updatedAt: true,
+      assignee: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+      project: {
+        select: {
+          id: true,
+          name: true,
+          workspaceId: true,
+        },
+      },
+      comments: {
+        select: {
+          id: true,
+          content: true,
+          createdAt: true,
+          updatedAt: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
         orderBy: {
           createdAt: 'desc',
         },
-        skip,
-        take: limit,
-      }),
-      this.prisma.task.count({
-        where,
-      }),
-    ]);
-
-    return {
-      data: tasks,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
       },
-    };
+    },
+  });
+
+  if (!task) {
+    throw new NotFoundException('Task not found');
   }
 
-  async findOne(userId: string, taskId: string) {
-    const task = await this.prisma.task.findUnique({
-      where: {
-        id: taskId,
+  const membership = await this.workspaceAccess.getMembership(
+    userId,
+    task.project.workspaceId,
+  );
+
+  return {
+    role: membership.role,
+    task: {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      priority: task.priority,
+      dueDate: task.dueDate,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      assignee: task.assignee,
+      project: {
+        id: task.project.id,
+        name: task.project.name,
       },
-      include: {
-        ...this.taskInclude(),
-        project: {
-          include: {
-            workspace: true,
-          },
-        },
-        comments: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-        },
-      },
-    });
-
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
-
-    const membership = await this.workspaceAccess.getMembership(
-      userId,
-      task.project.workspaceId,
-    );
-
-    return {
-      role: membership.role,
-      task,
-    };
-  }
+      comments: task.comments,
+    },
+  };
+}
 
   async update(userId: string, taskId: string, updateTaskDto: UpdateTaskDto) {
     const task = await this.prisma.task.findUnique({
@@ -154,22 +189,22 @@ export class TasksService {
       );
     }
 
-    return this.prisma.task.update({
-      where: {
-        id: taskId,
-      },
-      data: {
-        title: updateTaskDto.title,
-        description: updateTaskDto.description,
-        status: updateTaskDto.status,
-        priority: updateTaskDto.priority,
-        dueDate: updateTaskDto.dueDate
-          ? new Date(updateTaskDto.dueDate)
-          : undefined,
-        assigneeId: updateTaskDto.assigneeId,
-      },
-      include: this.taskInclude(),
-    });
+  return this.prisma.task.update({
+  where: {
+    id: taskId,
+  },
+  data: {
+    title: updateTaskDto.title,
+    description: updateTaskDto.description,
+    status: updateTaskDto.status,
+    priority: updateTaskDto.priority,
+    dueDate: updateTaskDto.dueDate
+      ? new Date(updateTaskDto.dueDate)
+      : undefined,
+    assigneeId: updateTaskDto.assigneeId,
+  },
+  select: this.taskSelect(),
+});
   }
 
   async remove(userId: string, taskId: string) {
@@ -219,22 +254,32 @@ export class TasksService {
     return project;
   }
 
-  private taskInclude() {
-    return {
-      assignee: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
+  
+private taskSelect() {
+  return {
+    id: true,
+    title: true,
+    description: true,
+    status: true,
+    priority: true,
+    dueDate: true,
+    createdAt: true,
+    updatedAt: true,
+    assignee: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
       },
-      project: {
-        select: {
-          id: true,
-          name: true,
-          workspaceId: true,
-        },
+    },
+    project: {
+      select: {
+        id: true,
+        name: true,
       },
-    };
-  }
+    },
+  };
+}
+
+
 }
