@@ -16,7 +16,10 @@ import type { CurrentUserType } from '../common/decorators/current-user.decorato
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectsService } from './projects.service';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Projects')
+@ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller()
 export class ProjectsController {

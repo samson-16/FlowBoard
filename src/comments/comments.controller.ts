@@ -12,7 +12,11 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { CurrentUserType } from '../common/decorators/current-user.decorator';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+
+@ApiTags('Comments')
+@ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller()
 export class CommentsController {
